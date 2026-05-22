@@ -2,26 +2,13 @@
 import Foundation
 import AppKit
 
-enum WheelSensitivity: String {
-    case low = "low"
-    case medium = "medium"
-    case high = "high"
-    case extreme = "extreme"
-}
-
-enum ScrollDirection: String {
-    case standard = "standard"
-    case natural = "natural"
-}
-
 enum Mode: String {
     case scrolling = "scrolling"
-    case playback = "playback"
-}
-
-enum HapticsMode: String {
-    case enabled = "enabled"
-    case disabled = "disabled"
+    case playback  = "playback"
+    case fcp       = "fcp"
+    case zoom      = "zoom"
+    case meetings  = "meetings"
+    case phone     = "phone"
 }
 
 extension NSMenuItem {
@@ -36,364 +23,196 @@ class MenuOptionItem<Type>: NSMenuItem {
         super.init(title: title, action: nil, keyEquivalent: "")
         self.representedObject = option
     }
-    
-    required init(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
+
+    required init(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    var selected: Bool {
+        get { self.state == .on }
+        set(on) { self.state = on ? .on : .off }
     }
-    
-    var selected : Bool
-    {
-        get { return self.state == .on }
-        set (on) { self.state = on ? .on : .off }
-    }
-    
-    var option : Type
-    {
-        get
-        {
-            return self.representedObject as! Type
-        }
-    }
+
+    var option: Type { self.representedObject as! Type }
 }
 
-class ControllerOptionItem: MenuOptionItem<Mode>
-{
+class ControllerOptionItem: MenuOptionItem<Mode> {
     let controller: Controller
-    
+
     init(title: String, mode: Mode, controller: Controller) {
         self.controller = controller
         super.init(title: title, option: mode)
     }
-    
-    required init(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
+
+    required init(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 }
 
-
-extension NSMenu {
-    func addMenuItems(_ items: StatusBarController.MenuItems) {
-        self.addItem(items.title)
-        self.addItem(items.connectionStatus)
-        self.addItem(items.separator)
-        self.addItem(items.scrollMode)
-        self.addItem(items.playbackMode)
-        self.addItem(items.separator2)
-        
-        items.wheelSensitivity.submenu = NSMenu.init()
-        for sensitivityOption in items.wheelSensitivityOptions {
-            items.wheelSensitivity.submenu?.addItem(sensitivityOption)
-        }
-        self.addItem(items.wheelSensitivity)
-        
-        items.scrollDirection.submenu = NSMenu.init()
-        for scrollDirectionOption in items.scrollDirectionOptions {
-            items.scrollDirection.submenu?.addItem(scrollDirectionOption)
-        }
-        self.addItem(items.scrollDirection)
-        
-        items.hapticsMode.submenu = NSMenu.init()
-        for hapticsModeOption in items.hapticsModeOptions {
-            items.hapticsMode.submenu?.addItem(hapticsModeOption)
-        }
-        self.addItem(items.hapticsMode)
-        
-        self.addItem(items.separator3)
-        self.addItem(items.quit)
-    }
-}
-
-class StatusBarController
-{
-    private let statusBar: NSStatusBar
+class StatusBarController {
+    private let statusBar:  NSStatusBar
     private let statusItem: NSStatusItem
-    private let menu: NSMenu
-    private let dial: Dial
+    private let menu:       NSMenu
+    private let dial:       Dial
+    private let settings:   DialSettings
     private let menuItems = MenuItems()
-    
+
     struct MenuItems {
-        let title = NSMenuItem.init(title: "Mac Dial")
-        let connectionStatus = NSMenuItem.init()
-        let separator = NSMenuItem.separator()
-        let scrollMode = ControllerOptionItem.init(title: "Scroll mode", mode: .scrolling, controller: ScrollController())
-        let playbackMode = ControllerOptionItem.init(title: "Playback mode", mode: .playback, controller: PlaybackController())
-        let separator2 = NSMenuItem.separator()
-        let wheelSensitivity = NSMenuItem.init(title: "Wheel Sensitivity")
-        let wheelSensitivityOptions = [
-            MenuOptionItem<WheelSensitivity>.init(title: "Low", option: .low),
-            MenuOptionItem<WheelSensitivity>.init(title: "Medium", option: .medium),
-            MenuOptionItem<WheelSensitivity>.init(title: "High", option: .high),
-            MenuOptionItem<WheelSensitivity>.init(title: "Extreme", option: .extreme)
-        ]
-        let scrollDirection = NSMenuItem.init(title: "Scroll Direction")
-        let scrollDirectionOptions = [
-            MenuOptionItem<ScrollDirection>.init(title: "Standard", option: .standard),
-            MenuOptionItem<ScrollDirection>.init(title: "Natural", option: .natural)
-        ]
-        let hapticsMode = NSMenuItem.init(title: "Haptics")
-        let hapticsModeOptions = [
-            MenuOptionItem<HapticsMode>.init(title: "Disabled", option: .disabled),
-            MenuOptionItem<HapticsMode>.init(title: "Enabled", option: .enabled)
-        ]
-        let separator3 = NSMenuItem.separator()
-        let quit = NSMenuItem.init(title: "Quit")
+        let title            = NSMenuItem(title: "Mac Dial")
+        let connectionStatus = NSMenuItem()
+        let sep1             = NSMenuItem.separator()
+        let scrollMode       = ControllerOptionItem(title: "Scrolling",    mode: .scrolling, controller: ScrollController())
+        let playbackMode     = ControllerOptionItem(title: "Playing",      mode: .playback,  controller: PlaybackController())
+        let fcpScrubMode     = ControllerOptionItem(title: "Scrubbing",    mode: .fcp,       controller: FCPScrubController())
+        let zoomMode         = ControllerOptionItem(title: "Zooming",      mode: .zoom,      controller: ZoomController())
+        let meetingsMode     = ControllerOptionItem(title: "Conferencing", mode: .meetings,  controller: MeetingsController())
+        let phoneMode        = ControllerOptionItem(title: "Calling",      mode: .phone,     controller: PhoneController())
+        let sep2             = NSMenuItem.separator()
+        let settingsItem     = NSMenuItem(title: "Settings…")
+        let sep3             = NSMenuItem.separator()
+        let quit             = NSMenuItem(title: "Quit")
     }
-    
-    var currentMode: Mode
-    {
+
+    var currentMode: Mode {
         get {
-            switch UserDefaults.standard.string(forKey: "mode")
-            {
-            case .some("scroll"):
-                return .scrolling
-            case .some("playback"):
-                return .playback
-            default:
-                return .scrolling
+            switch UserDefaults.standard.string(forKey: "mode") {
+            case .some("scroll"):   return .scrolling
+            case .some("playback"): return .playback
+            case .some("fcp"):      return .fcp
+            case .some("zoom"):     return .zoom
+            case .some("meetings"): return .meetings
+            case .some("phone"):    return .phone
+            default:                return .playback
             }
         }
-        
-        set (value) {
-            switch (value)
-            {
-            case .playback:
-                UserDefaults.standard.setValue("playback", forKey: "mode")
-            case .scrolling:
-                UserDefaults.standard.setValue("scroll", forKey: "mode")
-            }
-        }
-    }
-    
-    var currentController: Controller
-    {
-        get {
-            switch (currentMode)
-            {
-            case .playback:
-                return menuItems.playbackMode.controller
-            case .scrolling:
-                return menuItems.scrollMode.controller
+        set {
+            switch newValue {
+            case .scrolling: UserDefaults.standard.set("scroll",   forKey: "mode")
+            case .playback:  UserDefaults.standard.set("playback", forKey: "mode")
+            case .fcp:       UserDefaults.standard.set("fcp",      forKey: "mode")
+            case .zoom:      UserDefaults.standard.set("zoom",     forKey: "mode")
+            case .meetings:  UserDefaults.standard.set("meetings", forKey: "mode")
+            case .phone:     UserDefaults.standard.set("phone",    forKey: "mode")
             }
         }
     }
-    
-    var wheelSensitivity: WheelSensitivity? {
-        get {
-            let raw = UserDefaults.standard.string(forKey: "sensitivity") ?? WheelSensitivity.medium.rawValue
-            return WheelSensitivity(rawValue: raw)
-        }
-        set (sensitivity) {
-            switch sensitivity {
-            case .low:
-                dial.wheelSensitivity = 18
-                break
-            case .medium:
-                dial.wheelSensitivity = 36
-                break
-            case .high:
-                dial.wheelSensitivity = 72
-                break
-            case .extreme:
-                dial.wheelSensitivity = 360
-            case .none:
-                break
-            }
-            for option in menuItems.wheelSensitivityOptions {
-                option.state = (option.representedObject as! WheelSensitivity) == sensitivity ? .on : .off
-            }
-            
-            UserDefaults.standard.setValue(sensitivity?.rawValue, forKey: "sensitivity")
+
+    var currentController: Controller {
+        switch currentMode {
+        case .scrolling: return menuItems.scrollMode.controller
+        case .playback:  return menuItems.playbackMode.controller
+        case .fcp:       return menuItems.fcpScrubMode.controller
+        case .zoom:      return menuItems.zoomMode.controller
+        case .meetings:  return menuItems.meetingsMode.controller
+        case .phone:     return menuItems.phoneMode.controller
         }
     }
-    
-    var scrollDirection: ScrollDirection? {
-        get {
-            let raw = UserDefaults.standard.string(forKey: "direction") ?? ScrollDirection.natural.rawValue
-            return ScrollDirection(rawValue: raw)
-        }
-        set (scrollingDirection) {
-            switch scrollingDirection {
-            case .standard:
-                dial.scrollDirection = 1
-                break
-            case .natural:
-                dial.scrollDirection = -1
-                break
-            case .none:
-                break
-            }
-            for option in menuItems.scrollDirectionOptions {
-                option.state = (option.representedObject as! ScrollDirection) == scrollingDirection ? .on : .off
-            }
-            
-            UserDefaults.standard.setValue(scrollingDirection?.rawValue, forKey: "direction")
-        }
-    }
-    
-    var hapticsMode: HapticsMode? {
-        get {
-            let raw = UserDefaults.standard.string(forKey: "hapticsmode") ?? HapticsMode.disabled.rawValue
-            return HapticsMode(rawValue: raw)
-        }
-        set (hapticsModeSet) {
-            switch hapticsModeSet {
-            case .disabled:
-                dial.haptics = false
-                break
-            case .enabled:
-                dial.haptics = true
-                break
-            case .none:
-                break
-            }
-            for option in menuItems.hapticsModeOptions {
-                option.state = (option.representedObject as! HapticsMode) == hapticsModeSet ? .on : .off
-            }
-            
-            UserDefaults.standard.setValue(String(hapticsModeSet!.rawValue), forKey: "hapticsmode")
-        }
-    }
-    
-    init( _ dial: Dial) {
-        self.dial = dial
-        self.menu = NSMenu.init()
-        
-        statusBar = NSStatusBar.init()
+
+    init(_ dial: Dial, settings: DialSettings) {
+        self.dial     = dial
+        self.settings = settings
+        self.menu     = NSMenu()
+
+        statusBar  = NSStatusBar.system
         statusItem = statusBar.statusItem(withLength: NSStatusItem.variableLength)
-        
-        menu.minimumWidth = 260
-        
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.boldSystemFont(ofSize: 0)
-        ]
-        
-        menuItems.title.attributedTitle = NSAttributedString(string: menuItems.title.title, attributes: attributes)
+        menu.minimumWidth = 220
+
+        let bold: [NSAttributedString.Key: Any] = [.font: NSFont.boldSystemFont(ofSize: 0)]
+        menuItems.title.attributedTitle = NSAttributedString(string: menuItems.title.title, attributes: bold)
         menuItems.title.target = self
-        menuItems.title.action = #selector(showAbout(sender:))
-        
-        menuItems.connectionStatus.target = self
+        menuItems.title.action = #selector(openSettings(sender:))
+
         menuItems.connectionStatus.isEnabled = false
-        
-        menuItems.scrollMode.target = self
-        menuItems.scrollMode.action = #selector(setMode(sender:))
-        menuItems.scrollMode.selected = currentMode == .scrolling;
-        
-        menuItems.playbackMode.target = self
-        menuItems.playbackMode.action = #selector(setMode(sender:))
-        menuItems.playbackMode.selected = currentMode == .playback;
-        
-        for option in menuItems.wheelSensitivityOptions {
-            option.target = self
-            option.action = #selector(setSensitivity(sender:))
-            option.selected = option.option == wheelSensitivity
+
+        for item in [menuItems.scrollMode, menuItems.playbackMode, menuItems.fcpScrubMode,
+                     menuItems.zoomMode, menuItems.meetingsMode, menuItems.phoneMode] {
+            item.target = self
+            item.action = #selector(setMode(sender:))
         }
-        wheelSensitivity = wheelSensitivity // trigger set which updates dial
-        
-        for option in menuItems.scrollDirectionOptions {
-            option.target = self
-            option.action = #selector(setScrollDirection(sender:))
-            option.selected = option.option == scrollDirection
-        }
-        
-        for option in menuItems.hapticsModeOptions {
-            option.target = self
-            option.action = #selector(setHaptics(sender:))
-            option.selected = option.option == hapticsMode
-        }
-        hapticsMode = hapticsMode // trigger set which updates dial
-        
-        
-        menuItems.quit.target = self;
+        menuItems.scrollMode.selected    = currentMode == .scrolling
+        menuItems.playbackMode.selected  = currentMode == .playback
+        menuItems.fcpScrubMode.selected  = currentMode == .fcp
+        menuItems.zoomMode.selected      = currentMode == .zoom
+        menuItems.meetingsMode.selected  = currentMode == .meetings
+        menuItems.phoneMode.selected     = currentMode == .phone
+
+        menuItems.settingsItem.target = self
+        menuItems.settingsItem.action = #selector(openSettings(sender:))
+
+        menuItems.quit.target = self
         menuItems.quit.action = #selector(quitApp(sender:))
-        
-        menu.addMenuItems(menuItems)
-        
-        statusItem.menu = menu
-        
-        if let button = statusItem.button {
-            button.target = self
-            updateIcon()
+
+        for item in [menuItems.title, menuItems.connectionStatus, menuItems.sep1,
+                     menuItems.scrollMode, menuItems.playbackMode, menuItems.fcpScrubMode,
+                     menuItems.zoomMode, menuItems.meetingsMode, menuItems.phoneMode,
+                     menuItems.sep2, menuItems.settingsItem, menuItems.sep3, menuItems.quit] {
+            menu.addItem(item)
         }
-        
-        Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self]_ in
+
+        statusItem.menu = menu
+        updateIcon()
+
+        Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             self?.updateConnectionStatus()
         }
-        
+
         dial.onButtonStateChanged = { [unowned self] state in
             switch state {
-            case .pressed:
-                currentController.onDown()
-                break
-            case .released:
-                currentController.onUp()
-                break
+            case .pressed:  currentController.onDown()
+            case .released: currentController.onUp()
             }
         }
-        
+
         dial.onRotation = { [unowned self] rotation, scrollDirection in
             currentController.onRotate(rotation, scrollDirection)
         }
     }
-    
+
+    // MARK: - Public API
+
+    func switchMode(to mode: Mode) {
+        menuItems.scrollMode.state   = mode == .scrolling ? .on : .off
+        menuItems.playbackMode.state = mode == .playback  ? .on : .off
+        menuItems.fcpScrubMode.state = mode == .fcp       ? .on : .off
+        menuItems.zoomMode.state     = mode == .zoom      ? .on : .off
+        menuItems.meetingsMode.state = mode == .meetings  ? .on : .off
+        menuItems.phoneMode.state    = mode == .phone     ? .on : .off
+        currentMode = mode
+        settings.applySensitivity(for: mode)
+        updateIcon()
+    }
+
+    // MARK: - Private
+
     private func updateConnectionStatus() {
         if dial.device.isConnected {
-            let serialNumber = dial.device.serialNumber
-            menuItems.connectionStatus.title = "Surface Dial '\(serialNumber)' connected"
-        }
-        else {
+            menuItems.connectionStatus.title = "Surface Dial '\(dial.device.serialNumber)' connected"
+        } else {
             menuItems.connectionStatus.title = "No Surface Dial connected"
         }
     }
-    
+
     private func updateIcon() {
-        
-        if let button = statusItem.button {
-            if (menuItems.scrollMode.state == .on) {
-                button.image = #imageLiteral(resourceName: "icon-scroll")
-            }
-            else if (menuItems.playbackMode.state == .on) {
-                button.image = #imageLiteral(resourceName: "icon-playback")
-            }
-            
-            button.image?.size = NSSize(width: 18, height: 18)
-            
-            button.imagePosition = .imageLeft
+        guard let button = statusItem.button else { return }
+        let symbol: String
+        switch currentMode {
+        case .scrolling: symbol = "arrow.up.arrow.down"
+        case .playback:  symbol = "playpause"
+        case .fcp:       symbol = "forward.frame"
+        case .zoom:      symbol = "magnifyingglass"
+        case .meetings:  symbol = "video.fill"
+        case .phone:     symbol = "phone.fill"
         }
+        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: symbol)
+        button.image?.size = NSSize(width: 18, height: 18)
+        button.imagePosition = .imageLeft
     }
-    
-    @objc func showAbout(sender: AnyObject) {
-        
-    }
-    
+
     @objc func setMode(sender: AnyObject) {
-        
-        let item = sender as! ControllerOptionItem
-        
-        menuItems.playbackMode.state = item == menuItems.playbackMode ? .on : .off
-        menuItems.scrollMode.state = item == menuItems.scrollMode ? .on : .off
-        
-        currentMode = item.option
-        
-        updateIcon()
+        switchMode(to: (sender as! ControllerOptionItem).option)
     }
-    
-    @objc func setSensitivity(sender: AnyObject) {
-        let item = sender as! NSMenuItem
-        wheelSensitivity = (item.representedObject as! WheelSensitivity)
-    }
-    
-    @objc func setScrollDirection(sender: AnyObject) {
-        let item = sender as! NSMenuItem
-        scrollDirection = (item.representedObject as! ScrollDirection)
-    }
-    
-    @objc func setHaptics(sender: AnyObject) {
-        let item = sender as! NSMenuItem
-        hapticsMode = (item.representedObject as! HapticsMode)
+
+    @objc func openSettings(sender: AnyObject) {
+        SettingsWindowController.shared.show(settings: settings)
     }
 
     @objc func quitApp(sender: AnyObject) {
         NSApplication.shared.terminate(self)
     }
-
 }
